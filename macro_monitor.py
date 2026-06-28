@@ -6,20 +6,20 @@ import requests
 import yfinance as yf
 from pybit.unified_trading import HTTP
 
-# --- ПОЛУЧЕНИЕ ТОКЕНОВ ИЗ ОКРУЖЕНИЯ (ENV) ---
-# Скрипт возьмет те же переменные, что прописаны в твоей системе/лайв-боте
+# --- ENVIRONMENT VARIABLES SETUP (ENV) ---
+# The script will fetch the variables directly from your system environment
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 MA_WINDOW = 50
-Z_THRESHOLD = 3.0  # Порог паники (3 сигмы)
+Z_THRESHOLD = 3.0  # Panic Threshold (3 Sigmas)
 
-# Ключи Bybit не нужны, так как мы берем только публичные рыночные данные
+# Bybit API keys are not required since we only fetch public market data
 session = HTTP(testnet=False, domain="bytick")
 
 def send_telegram_message(text):
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("⚠ Ошибка: Переменные TELEGRAM_TOKEN или TELEGRAM_CHAT_ID не найдены в env!")
+        print("⚠ Error: TELEGRAM_TOKEN or TELEGRAM_CHAT_ID not found in environment variables!")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
     try:
@@ -28,15 +28,15 @@ def send_telegram_message(text):
         pass
 
 def get_crypto_gold_data():
-    """Получаем данные по Золоту и Биткоину с Bybit"""
+    """Fetches Gold and Bitcoin market data from Bybit"""
     try:
-        # Золото
+        # Gold Data
         g_klines = session.get_kline(category="linear", symbol="XAUUSDT", interval="15", limit=MA_WINDOW + 5)
         gdf = pd.DataFrame(g_klines['result']['list'], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'turnover'])
         gdf = gdf.iloc[::-1].reset_index(drop=True)
         gdf['close'] = gdf['close'].astype(float)
         
-        # Биткоин
+        # Bitcoin Data
         b_klines = session.get_kline(category="linear", symbol="BTCUSDT", interval="15", limit=MA_WINDOW + 5)
         bdf = pd.DataFrame(b_klines['result']['list'], columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'turnover'])
         bdf = bdf.iloc[::-1].reset_index(drop=True)
@@ -44,11 +44,11 @@ def get_crypto_gold_data():
         
         return gdf, bdf
     except Exception as e:
-        print(f"Ошибка получения данных с Bybit: {e}")
+        print(f"Error fetching data from Bybit: {e}")
         return None, None
 
 def get_dxy_data():
-    """Получаем данные Индекса Доллара (DXY) из Yahoo Finance"""
+    """Fetches Dollar Index (DXY) data from Yahoo Finance"""
     try:
         dxy = yf.Ticker("DX-Y.NYB")
         df = dxy.history(interval="15m", period="5d")
@@ -58,18 +58,19 @@ def get_dxy_data():
         df.columns = [c.lower() for c in df.columns]
         return df
     except Exception as e:
-        print(f"Ошибка получения DXY: {e}")
+        print(f"Error fetching DXY data: {e}")
         return None
 
 def calculate_z_score(df):
-    """Считаем Z-Score для последней закрытой свечи"""
+    """Calculates Z-Score for the last closed candle"""
     df['ma'] = df['close'].rolling(window=MA_WINDOW).mean()
     df['std'] = df['close'].rolling(window=MA_WINDOW).std()
     last_row = df.dropna().iloc[-1]
     z_score = (last_row['close'] - last_row['ma']) / last_row['std']
     return z_score, last_row['close']
 
-print("🚀 Макро-монитор запущен и следит за env-переменными...")
+
+print("🚀 Macro Monitor is running and listening to environment variables...")
 
 last_signal_time = 0
 
@@ -83,32 +84,32 @@ while True:
         z_btc, price_btc = calculate_z_score(bdf)
         z_dxy, price_dxy = calculate_z_score(ddf)
         
-        print(f"⏱ Проверка | Z_Gold: {z_gold:.2f} | Z_BTC: {z_btc:.2f} | Z_DXY: {z_dxy:.2f}")
+        print(f"⏱ Check | Z_Gold: {z_gold:.2f} | Z_BTC: {z_btc:.2f} | Z_DXY: {z_dxy:.2f}")
         
-        # Системный шум: сработка по 2 и более активам одновременно
+        # Systemic risk check: Trigger if 2 or more assets cross the threshold simultaneously
         condition_met = (abs(z_gold) >= Z_THRESHOLD) + (abs(z_btc) >= Z_THRESHOLD) + (abs(z_dxy) >= Z_THRESHOLD)
         
         if condition_met >= 2 and (current_time - last_signal_time > 7200):
             
-            str_gold = "РЕЗКИЙ ВЗЛЕТ 📈" if z_gold > 0 else "ЖЕСТКИЙ ПРОЛИВ 📉"
-            str_btc = "РЕЗКИЙ ВЗЛЕТ 📈" if z_btc > 0 else "ЖЕСТКИЙ ПРОЛИВ 📉"
-            str_dxy = "РЕЗКИЙ ВЗЛЕТ 📈" if z_dxy > 0 else "ЖЕСТКИЙ ПРОЛИВ 📉"
+            str_gold = "SHARP SPIKE 📈" if z_gold > 0 else "HEAVY FLUSH 📉"
+            str_btc = "SHARP SPIKE 📈" if z_btc > 0 else "HEAVY FLUSH 📉"
+            str_dxy = "SHARP SPIKE 📈" if z_dxy > 0 else "HEAVY FLUSH 📉"
             
             msg = (
-                "🚨 [МАКРО-АЛЕРТ] ОБНАРУЖЕНА СИСТЕМНАЯ ПАНИКА РЫНКА\n\n"
-                "Мой алгоритм зафиксировал одновременное аномальное отклонение (Z-Score ≥ 3.0) "
-                "на ключевых рынках. Капитал панически переливается из одних активов в другие. "
-                "Новостные ленты, скорее всего, еще молчат.\n\n"
-                "📊 ТЕКУЩИЕ ДАННЫЕ АНОМАЛИИ:\n"
-                f"• 🟡 Золото (XAUUSDT): {str_gold} (Z-Score: {z_gold:.2f})\n"
-                f"• 🌐 Биткоин (BTCUSDT): {str_btc} (Z-Score: {z_btc:.2f})\n"
-                f"• 💵 Индекс Доллара (DXY): {str_dxy} (Z-Score: {z_dxy:.2f})\n\n"
-                "⚡️ ВЕРДИКТ: Прямо сейчас происходит крупное макроэкономическое или геополитическое событие. "
-                "Умные деньги уже бегут."
+                "🚨 [MACRO ALERT] SYSTEMIC MARKET PANIC DETECTED\n\n"
+                "The algorithm has detected a simultaneous abnormal deviation (Z-Score ≥ 3.0) "
+                "across core global markets. Capital is aggressively rotating out of risk parameters. "
+                "Mainstream news feeds are likely lagging behind this shift.\n\n"
+                "📊 CURRENT ANOMALY DATA:\n"
+                f"• 🟡 Gold (XAUUSDT): {str_gold} (Z-Score: {z_gold:.2f})\n"
+                f"• 🌐 Bitcoin (BTCUSDT): {str_btc} (Z-Score: {z_btc:.2f})\n"
+                f"• 💵 Dollar Index (DXY): {str_dxy} (Z-Score: {z_dxy:.2f})\n\n"
+                "⚡ VERDICT: A major macroeconomic or geopolitical catalyst is developing in real-time. "
+                "Smart money is moving."
             )
             
             send_telegram_message(msg)
-            print("🔔 Сигнал паники отправлен в Telegram!")
+            print("🔔 Panic signal dispatched to Telegram!")
             last_signal_time = current_time
             
     time.sleep(300)
